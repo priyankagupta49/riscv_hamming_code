@@ -235,6 +235,85 @@ module tb();
         end
 
         $display("Final Corrected Result (Register r12): %d", result_w);
+
+
+
+        ///************************************************************
+        `timescale 1ns / 1ps
+
+module tb();
+    reg clk = 0;
+    reg rst = 0;
+    reg [7:0] operand1, operand2;
+    reg [2:0] opcode;
+
+    wire [31:0] imem_waddr, imem_wdata;
+    wire imem_we;
+    wire [31:0] result_w;
+    wire done_signal; 
+
+    always #5 clk = ~clk; 
+
+    instr_loader loader (
+        .clk(clk), .rst(rst), .op1(operand1), .op2(operand2), .alu_op(opcode),
+        .imem_we(imem_we), .imem_addr(imem_waddr), .imem_wdata(imem_wdata), 
+        .done(done_signal)
+    );
+
+    Pipeline_top dut (
+        .clk(clk), .rst(rst), .imem_we(imem_we), .imem_waddr(imem_waddr), 
+        .imem_wdata(imem_wdata), .loader_done_in(done_signal), 
+        .ResultW_out(result_w)
+    );
+
+    initial begin
+    
+        rst = 0;
+        operand1 = 8'd10; operand2 = 8'd3; opcode = 3'd0; // Expect 13
+        #5; 
+        
+      
+        @(posedge clk);
+        rst = 1; 
+        $display("--- Test Start ---");
+        $display("Reset released. Loader writing SW/LW sequence.");
+
+        // Wait for Loader
+        wait(done_signal === 1'b1);
+        $display("Loader finished. CPU starting execution.");
+
+        // Wait for Store Word (SW) to complete
+        // We wait for the value (13) to be written to Data Memory Address 4 (mem[1])
+        repeat(7) @(posedge clk);
+        
+        $display("Original Data in mem[1]: %h", dut.memory.dmem.mem[1][31:0]);
+
+        // Inject SINGLE-BIT Error
+        // Flip bit 3 of the encoded word in memory index 1
+        $display("Injecting single-bit error at mem[1] bit [3]...");
+        dut.memory.dmem.mem[1][3] = ~dut.memory.dmem.mem[1][3];
+        
+        $display("Corrupted Data (Raw Memory): %h", dut.memory.dmem.mem[1][31:0]);
+
+        // Wait for Load Word (LW) to process the error
+        // LW will read the corrupted data, syndrome will be non-zero, s_err will trigger.
+        #5;
+
+        // Verification
+        if (dut.dmem_error && !dut.error_type_dmem) begin
+            $display("SUCCESS: Single-bit error detected and corrected!");
+        end else if (dut.dmem_error && dut.error_type_dmem) begin
+            $display("WARNING: Double-bit error detected instead of single!");
+        end else begin
+            $display("FAILURE: No error detected by Memory Stage.");
+        end
+
+        $display("Final Corrected Result (Register r12): %d", result_w);
+        
+        
+        $finish;
+    end
+endmodule
         
         
         $finish;
@@ -242,4 +321,5 @@ module tb();
 endmodule
 
 endmodule
+
 
